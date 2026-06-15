@@ -54,13 +54,13 @@ CSV_COLUMNS = [
 
 def default_output_path():
     timestamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-    return SCRIPT_DIR / "reports" / f"resnet50_blackhole_trace_2cqs_cpp_preprocessing_e2e_{timestamp}.csv"
+    return SCRIPT_DIR.parent / "reports" / f"resnet50_blackhole_trace_1cq_cpp_preprocessing_e2e_{timestamp}.csv"
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Measure Blackhole ResNet50 trace+2CQ steady-state inference with C++ TurboJPEG preprocessing. "
+            "Measure Blackhole ResNet50 trace+1CQ steady-state inference with C++ TurboJPEG preprocessing. "
             "The model path stays in Python/TT-NN; JPEG decode, resize, crop, normalize, and BF16 packing run in C++."
         )
     )
@@ -168,7 +168,12 @@ def read_device_profiler(device):
     ttnn.ReadDeviceProfiler(device)
 
 
-def run_trace_2cq_pipeline(device, inputs, test_infra, measurement_iterations):
+def to_torch_logits(output_tensor, test_infra, device):
+    output_tensor = ttnn.to_torch(output_tensor, device=device, mesh_composer=test_infra.output_mesh_composer)
+    return torch.reshape(output_tensor, (output_tensor.shape[0], 1000))
+
+
+def run_trace_1cq_pipeline(device, inputs, test_infra, measurement_iterations):
     tt_inputs_host, sharded_mem_config_dram, input_mem_config = test_infra.setup_dram_sharded_input(device, inputs)
 
     def model_wrapper(l1_input_tensor):
@@ -176,7 +181,7 @@ def run_trace_2cq_pipeline(device, inputs, test_infra, measurement_iterations):
         return test_infra.run()
 
     pipeline = create_pipeline_from_config(
-        config=PipelineConfig(use_trace=True, num_command_queues=2, all_transfers_on_separate_command_queue=False),
+        config=PipelineConfig(use_trace=True, num_command_queues=1, all_transfers_on_separate_command_queue=False),
         model=model_wrapper,
         device=device,
         dram_input_memory_config=sharded_mem_config_dram,
@@ -200,7 +205,8 @@ def run_trace_2cq_pipeline(device, inputs, test_infra, measurement_iterations):
             logger.info(f"Output {index} validation: {pcc_message}")
             assert passed, f"Output {index} validation failed: {pcc_message}"
 
-        return inference_total / measurement_iterations
+        last_output = to_torch_logits(outputs[-1], test_infra, device)
+        return inference_total / measurement_iterations, last_output
     finally:
         pipeline.cleanup()
 
@@ -260,13 +266,13 @@ def benchmark_batch(
         test_infra.torch_output_tensor = cpu_logits
 
         ttnn.synchronize_device(device)
-        inference_time = run_trace_2cq_pipeline(device, inputs, test_infra, args.measurement_iterations)
+        inference_time, model_output = run_trace_1cq_pipeline(device, inputs, test_infra, args.measurement_iterations)
 
         total_run_time = preprocessing_time + inference_time
     except Exception:
         logger.exception(f"Failed to run TT pipeline for batch_size={batch_size}")
         row["Status"] = "TT_PIPELINE_ERROR"
-        return row
+        return row, None
 
     row.update(
         {
@@ -279,7 +285,7 @@ def benchmark_batch(
             "Status": "OK",
         }
     )
-    return row
+    return row, model_output
 
 
 def make_error_row(batch_size, error, worker_count=""):
@@ -347,34 +353,40 @@ def main():
         device_id=args.device_id,
         l1_small_size=args.l1_small_size,
         trace_region_size=args.trace_region_size,
-        num_command_queues=2,
+        num_command_queues=1,
     )
     rows = []
+    last_model_output = None
 
     try:
         ttnn.SetDefaultDevice(device)
         for worker_count in worker_counts:
             logger.info(f"Benchmarking with cpp_preprocess_workers={worker_count}")
             for batch_size in batch_sizes:
-                logger.info(f"Benchmarking ResNet50 trace+2CQ batch_size={batch_size}")
+                logger.info(f"Benchmarking ResNet50 trace+1CQ batch_size={batch_size}")
                 try:
-                    rows.append(
-                        benchmark_batch(
-                            device,
-                            batch_size,
-                            image_bytes_list,
-                            torch_resnet50,
-                            model_location_generator,
-                            worker_count,
-                            args,
-                        )
+                    row, model_output = benchmark_batch(
+                        device,
+                        batch_size,
+                        image_bytes_list,
+                        torch_resnet50,
+                        model_location_generator,
+                        worker_count,
+                        args,
                     )
+                    rows.append(row)
+                    if model_output is not None:
+                        last_model_output = model_output
                 except Exception as error:
                     logger.exception(f"Failed to benchmark batch_size={batch_size}, workers={worker_count}")
                     rows.append(make_error_row(batch_size, error, worker_count))
     finally:
         ttnn.SetDefaultDevice(original_default_device)
         ttnn.close_device(device)
+
+    if last_model_output is not None:
+        print("Last model output tensor:")
+        print(last_model_output)
 
     write_csv(args.output, rows)
     logger.info(f"Wrote {len(rows)} rows to {args.output.resolve()}")

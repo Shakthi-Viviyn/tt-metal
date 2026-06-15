@@ -53,7 +53,7 @@ CSV_COLUMNS = [
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Measure Blackhole ResNet50 trace+2CQ steady-state inference plus host image preprocessing, "
+            "Measure Blackhole ResNet50 trace+1CQ steady-state inference plus host image preprocessing, "
             "and write one CSV row per batch size."
         )
     )
@@ -123,7 +123,7 @@ def format_throughput(batch_size, seconds):
 
 def default_output_path():
     timestamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-    return Path("generated") / f"resnet50_blackhole_trace_2cqs_turbojpeg_preprocessing_e2e_{timestamp}.csv"
+    return Path(__file__).resolve().parent / "reports" / f"resnet50_blackhole_trace_1cq_turbojpeg_preprocessing_e2e_{timestamp}.csv"
 
 
 def make_model_location_generator(torchvision_weights_path):
@@ -259,7 +259,7 @@ def read_device_profiler(device):
     ttnn.ReadDeviceProfiler(device)
 
 
-def run_trace_2cq_pipeline(device, inputs, test_infra, measurement_iterations):
+def run_trace_1cq_pipeline(device, inputs, test_infra, measurement_iterations):
     tt_inputs_host, sharded_mem_config_dram, input_mem_config = test_infra.setup_dram_sharded_input(device, inputs)
 
     def model_wrapper(l1_input_tensor):
@@ -267,7 +267,7 @@ def run_trace_2cq_pipeline(device, inputs, test_infra, measurement_iterations):
         return test_infra.run()
 
     pipeline = create_pipeline_from_config(
-        config=PipelineConfig(use_trace=True, num_command_queues=2, all_transfers_on_separate_command_queue=False),
+        config=PipelineConfig(use_trace=True, num_command_queues=1, all_transfers_on_separate_command_queue=False),
         model=model_wrapper,
         device=device,
         dram_input_memory_config=sharded_mem_config_dram,
@@ -352,7 +352,7 @@ def benchmark_batch(
         test_infra.torch_output_tensor = cpu_logits
 
         ttnn.synchronize_device(device)
-        _, inference_time = run_trace_2cq_pipeline(device, inputs, test_infra, args.measurement_iterations)
+        _, inference_time = run_trace_1cq_pipeline(device, inputs, test_infra, args.measurement_iterations)
         total_run_time = preprocessing_time + inference_time
     except Exception as error:
         logger.exception(f"Failed to run TT pipeline for batch_size={batch_size}")
@@ -412,14 +412,14 @@ def main():
         device_id=args.device_id,
         l1_small_size=args.l1_small_size,
         trace_region_size=args.trace_region_size,
-        num_command_queues=2,
+        num_command_queues=1,
     )
     rows = []
 
     try:
         ttnn.SetDefaultDevice(device)
         for batch_size in batch_sizes:
-            logger.info(f"Benchmarking ResNet50 trace+2CQ batch_size={batch_size}")
+            logger.info(f"Benchmarking ResNet50 trace+1CQ batch_size={batch_size}")
             try:
                 rows.append(
                     benchmark_batch(
