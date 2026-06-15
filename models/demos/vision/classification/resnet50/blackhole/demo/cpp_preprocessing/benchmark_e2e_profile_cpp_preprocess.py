@@ -17,13 +17,18 @@ try:
     import cpp_resnet_preprocess
 except ImportError as error:
     raise ImportError(
-        "cpp_resnet_preprocess is not built. From this directory, run: "
-        "python3 setup.py build_ext --inplace"
+        "Failed to import cpp_resnet_preprocess. If the extension is not built, run "
+        "`python3 setup.py build_ext --inplace` from this directory. If the error mentions "
+        "libturbojpeg.so, make sure the TurboJPEG library directory is visible at runtime, "
+        "for example: `LD_LIBRARY_PATH=/opt/libjpeg-turbo/lib64:$LD_LIBRARY_PATH python3 "
+        "benchmark_e2e_profile_cpp_preprocess.py`."
     ) from error
 
 
 DEFAULT_BATCH_SIZES = (16, 32)
-DEFAULT_IMAGE_DIR = Path("models/demos/vision/classification/resnet50/ttnn_resnet/demo/images")
+SCRIPT_DIR = Path(__file__).resolve().parent
+TT_METAL_ROOT = SCRIPT_DIR.parents[7]
+DEFAULT_IMAGE_DIR = TT_METAL_ROOT / "models/demos/vision/classification/resnet50/ttnn_resnet/demo/images"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg"}
 MODEL_CONFIG = {
     "MATH_FIDELITY": ttnn.MathFidelity.LoFi,
@@ -49,7 +54,7 @@ CSV_COLUMNS = [
 
 def default_output_path():
     timestamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-    return Path("reports") / f"resnet50_blackhole_trace_2cqs_cpp_preprocessing_e2e_{timestamp}.csv"
+    return SCRIPT_DIR / "reports" / f"resnet50_blackhole_trace_2cqs_cpp_preprocessing_e2e_{timestamp}.csv"
 
 
 def parse_args():
@@ -372,7 +377,7 @@ def main():
         ttnn.close_device(device)
 
     write_csv(args.output, rows)
-    logger.info(f"Wrote {len(rows)} rows to {args.output}")
+    logger.info(f"Wrote {len(rows)} rows to {args.output.resolve()}")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ setup(
             sources=[str(this_dir / "cpp_resnet_preprocess.cpp")],
             include_dirs=split_env_paths("TURBOJPEG_INCLUDE_DIR"),
             library_dirs=split_env_paths("TURBOJPEG_LIB_DIR"),
+            runtime_library_dirs=split_env_paths("TURBOJPEG_LIB_DIR"),
             libraries=["turbojpeg"],
             extra_compile_args=["-O3", "-std=c++17"],
         )
