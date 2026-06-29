@@ -4,14 +4,17 @@
 set -e
 
 # Get absolute path of script directory (portable method)
-#script_dir=$(cd "$(dirname "$0")" && pwd)
-#if [ "$(pwd)" != "$script_dir" ]; then
-#  echo "Error: must run from $script_dir"
-#  exit 1
-#fi
+script_dir=$(cd "$(dirname "$0")" && pwd)
+tt_metal_root=$(cd "$script_dir/../.." && pwd)
 
-# Set TT_METAL_RUNTIME_ROOT to the installed metalium directory
-export TT_METAL_RUNTIME_ROOT="~ura/tt-metal"
+# Run from the generated graph directory so ./tensors paths resolve correctly.
+cd "$script_dir"
+
+# Set TT_METAL_RUNTIME_ROOT to this tt-metal checkout.
+export TT_METAL_RUNTIME_ROOT="$tt_metal_root"
+
+# Help CMake find TT-NNConfig/tt-nn-config from the tt-metal install prefix.
+export CMAKE_PREFIX_PATH="${TTNN_INSTALL_DIR:-$tt_metal_root/build_Release}${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 
 # Build
 echo "==================== BUILDING TTNN STANDALONE ==================="
