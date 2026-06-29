@@ -33,7 +33,9 @@
 #ifndef TTNN_CODEGEN_STANDALONE_CPP
 #define TTNN_CODEGEN_STANDALONE_CPP "ttnn-standalone.cpp"
 #endif
+#define main ttnn_codegen_generated_main
 #include TTNN_CODEGEN_STANDALONE_CPP
+#undef main
 
 namespace {
 
@@ -511,7 +513,6 @@ int parse_int_arg(const char *value, const std::string &name) {
 
 Args parse_args(int argc, char **argv) {
   Args args;
-  args.workers = static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
 
   for (int index = 1; index < argc; ++index) {
     const std::string flag = argv[index];
@@ -619,8 +620,7 @@ int main(int argc, char **argv) {
                             : std::filesystem::absolute(args.output);
     std::filesystem::current_path(TTNN_CODEGEN_GRAPH_DIR);
     const std::vector<std::string> image_bytes = load_image_bytes(args);
-    std::vector<::ttnn::Tensor> inputs =
-        load_inputs_for__main("./tensors/arg27.tensorbin");
+    std::vector<::ttnn::Tensor> inputs = load_inputs_for__main();
     std::optional<::ttnn::Tensor> last_output;
     const std::vector<int> worker_counts = {1, 2, 4, 8, 16, 32};
     std::vector<CsvRow> rows;
