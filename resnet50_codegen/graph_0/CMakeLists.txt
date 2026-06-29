@@ -61,30 +61,32 @@ set(TTNN_CODEGEN_STANDALONE_CPP
     "Generated TTNN standalone C++ file to include in the benchmark")
 get_filename_component(TTNN_CODEGEN_GRAPH_DIR "${TTNN_CODEGEN_STANDALONE_CPP}" DIRECTORY)
 
-if(TURBOJPEG_INCLUDE_DIR AND TURBOJPEG_LIBRARY)
-    add_executable(ttnn-codegen-benchmark benchmark_codegen_e2e.cpp)
-    set_property(TARGET ttnn-codegen-benchmark PROPERTY CXX_STANDARD 20)
-    set_property(TARGET ttnn-codegen-benchmark PROPERTY EXCLUDE_FROM_ALL TRUE)
-    target_link_libraries(ttnn-codegen-benchmark PRIVATE TTNN::TTNN ${TURBOJPEG_LIBRARY})
-    target_include_directories(
-        ttnn-codegen-benchmark
-        PRIVATE
-            ${TURBOJPEG_INCLUDE_DIR}
-            ${TTNN_CODEGEN_GRAPH_DIR}
-            "$ENV{TT_METAL_RUNTIME_ROOT}/ttnn/cpp"
-    )
-    target_compile_definitions(
-        ttnn-codegen-benchmark
-        PRIVATE
-            TTNN_CODEGEN_BATCH_SIZE=${TTNN_CODEGEN_BATCH_SIZE}
-            TTNN_CODEGEN_STANDALONE_CPP="${TTNN_CODEGEN_STANDALONE_CPP}"
-            TTNN_CODEGEN_GRAPH_DIR="${TTNN_CODEGEN_GRAPH_DIR}"
-    )
-    target_precompile_headers(
-        ttnn-codegen-benchmark
-        PRIVATE
-            "${TTNN_CODEGEN_GRAPH_DIR}/ttnn-precompiled.hpp"
-    )
-else()
-    message(STATUS "TurboJPEG not found; ttnn-codegen-benchmark target will not be generated")
+if(NOT TURBOJPEG_INCLUDE_DIR OR NOT TURBOJPEG_LIBRARY)
+    message(FATAL_ERROR
+        "TurboJPEG is required for ttnn-codegen-benchmark. "
+        "Install libturbojpeg-dev or set TURBOJPEG_INCLUDE_DIR and TURBOJPEG_LIB_DIR.")
 endif()
+
+add_executable(ttnn-codegen-benchmark benchmark_codegen_e2e.cpp)
+set_property(TARGET ttnn-codegen-benchmark PROPERTY CXX_STANDARD 20)
+set_property(TARGET ttnn-codegen-benchmark PROPERTY EXCLUDE_FROM_ALL TRUE)
+target_link_libraries(ttnn-codegen-benchmark PRIVATE TTNN::TTNN ${TURBOJPEG_LIBRARY})
+target_include_directories(
+    ttnn-codegen-benchmark
+    PRIVATE
+        ${TURBOJPEG_INCLUDE_DIR}
+        ${TTNN_CODEGEN_GRAPH_DIR}
+        "$ENV{TT_METAL_RUNTIME_ROOT}/ttnn/cpp"
+)
+target_compile_definitions(
+    ttnn-codegen-benchmark
+    PRIVATE
+        TTNN_CODEGEN_BATCH_SIZE=${TTNN_CODEGEN_BATCH_SIZE}
+        TTNN_CODEGEN_STANDALONE_CPP="${TTNN_CODEGEN_STANDALONE_CPP}"
+        TTNN_CODEGEN_GRAPH_DIR="${TTNN_CODEGEN_GRAPH_DIR}"
+)
+target_precompile_headers(
+    ttnn-codegen-benchmark
+    PRIVATE
+        "${TTNN_CODEGEN_GRAPH_DIR}/ttnn-precompiled.hpp"
+)
