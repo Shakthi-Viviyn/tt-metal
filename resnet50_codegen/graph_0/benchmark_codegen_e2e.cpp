@@ -53,11 +53,19 @@ constexpr float kStd[kChannels] = {0.229F, 0.224F, 0.225F};
 #define TTNN_CODEGEN_GRAPH_DIR "."
 #endif
 
+std::filesystem::path default_image_dir() {
+  const char *runtime_root = std::getenv("TT_METAL_RUNTIME_ROOT");
+  if (runtime_root != nullptr && runtime_root[0] != '\0') {
+    return std::filesystem::path(runtime_root) / "models/demos/vision/"
+           "classification/resnet50/ttnn_resnet/demo/images";
+  }
+  return "../../models/demos/vision/classification/resnet50/ttnn_resnet/demo/"
+         "images";
+}
+
 struct Args {
   std::filesystem::path image;
-  std::filesystem::path image_dir =
-      "../../models/demos/vision/classification/resnet50/ttnn_resnet/demo/"
-      "images";
+  std::filesystem::path image_dir = default_image_dir();
   std::filesystem::path output;
   int batch_size = TTNN_CODEGEN_BATCH_SIZE;
   int warmup_iterations = 10;
@@ -348,6 +356,11 @@ std::vector<std::string> load_image_bytes(const Args &args) {
     return {read_file_bytes(args.image)};
   }
 
+  if (!std::filesystem::is_directory(args.image_dir)) {
+    throw std::runtime_error("image directory not found: " +
+                             args.image_dir.string());
+  }
+
   std::vector<std::filesystem::path> image_paths;
   for (const auto &entry : std::filesystem::directory_iterator(args.image_dir)) {
     if (!entry.is_regular_file()) {
@@ -561,6 +574,15 @@ Args parse_args(int argc, char **argv) {
   return args;
 }
 
+void resolve_paths_before_graph_chdir(Args &args) {
+  if (!args.image.empty()) {
+    args.image = std::filesystem::absolute(args.image);
+  }
+  if (!args.image_dir.empty()) {
+    args.image_dir = std::filesystem::absolute(args.image_dir);
+  }
+}
+
 void maybe_print_top5(const ::ttnn::Tensor &device_output) {
   ::ttnn::Tensor host = ::ttnn::from_device(device_output);
   if (host.layout() != ::ttnn::Layout::ROW_MAJOR) {
@@ -614,7 +636,8 @@ Timing run_one_iteration(std::vector<::ttnn::Tensor> &inputs,
 
 int main(int argc, char **argv) {
   try {
-    const Args args = parse_args(argc, argv);
+    Args args = parse_args(argc, argv);
+    resolve_paths_before_graph_chdir(args);
     const std::filesystem::path output_path =
         args.output.empty() ? default_output_path(argv[0])
                             : std::filesystem::absolute(args.output);
