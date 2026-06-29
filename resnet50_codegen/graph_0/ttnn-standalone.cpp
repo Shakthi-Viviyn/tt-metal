@@ -9324,7 +9324,8 @@ static ::std::vector<::ttnn::Tensor> g_cached_result_main_const_eval_211;
   ::std::vector<::ttnn::Tensor> v1762 = util_create_vec(v1761);
   return v1762;
 }
-::std::vector<::ttnn::Tensor> load_inputs_for__main() {
+::std::vector<::ttnn::Tensor>
+load_inputs_for__main(const ::std::string &input_tensor_path) {
   ttnn::distributed::MeshDevice *v1 = ttnn::DeviceGetter::getInstance();
   ::ttnn::Tensor v2 = ttnn::loadTensor(
       "./tensors/arg0.tensorbin", ::ttnn::Layout::TILE,
@@ -9462,8 +9463,8 @@ static ::std::vector<::ttnn::Tensor> g_cached_result_main_const_eval_211;
       ::ttnn::MemoryConfig{::ttnn::TensorMemoryLayout::INTERLEAVED,
                            ::ttnn::BufferType::SYSTEM_MEMORY, ::std::nullopt});
   ::ttnn::Tensor v29 = ttnn::loadTensor(
-      "./tensors/arg27.tensorbin", ::ttnn::Layout::ROW_MAJOR,
-      ::ttnn::DataType::FLOAT32, v1,
+      input_tensor_path, ::ttnn::Layout::ROW_MAJOR, ::ttnn::DataType::FLOAT32,
+      v1,
       ::ttnn::MemoryConfig{::ttnn::TensorMemoryLayout::INTERLEAVED,
                            ::ttnn::BufferType::DRAM, ::std::nullopt});
   ::ttnn::Tensor v30 = ttnn::loadTensor(
@@ -10690,9 +10691,20 @@ static ::std::vector<::ttnn::Tensor> g_cached_result_main_const_eval_211;
       v262, v263, v264, v265, v266, v267, v268, v269);
   return v270;
 }
-int32_t main() {
-  ::std::vector<::ttnn::Tensor> v1 = load_inputs_for__main();
+#ifndef TTNN_STANDALONE_DISABLE_MAIN
+int32_t main(int argc, char **argv) {
+  const ::std::string input_tensor_path =
+      argc > 1 ? argv[1] : "./tensors/arg27.tensorbin";
+  const ::std::string output_tensor_path =
+      argc > 2 ? argv[2] : "./output.tensorbin";
+  ::std::vector<::ttnn::Tensor> v1 = load_inputs_for__main(input_tensor_path);
   ::std::vector<::ttnn::Tensor> v2 = _main(v1);
-  int32_t v3 = 0;
-  return v3;
+  ::ttnn::Tensor v3 = ::ttnn::from_device(v2[0]);
+  if (v3.layout() != ::ttnn::Layout::ROW_MAJOR) {
+    v3 = ::ttnn::to_layout(v3, ::ttnn::Layout::ROW_MAJOR);
+  }
+  ::tt::tt_metal::dump_tensor_flatbuffer(output_tensor_path, v3);
+  ::std::cout << "Wrote output tensor to " << output_tensor_path << ::std::endl;
+  return 0;
 }
+#endif

@@ -1,0 +1,61 @@
+#!/bin/sh
+
+set -e
+
+script_dir=$(cd "$(dirname "$0")" && pwd)
+tt_metal_root=$(cd "$script_dir/../.." && pwd)
+
+export TT_METAL_RUNTIME_ROOT="$tt_metal_root"
+
+ttnn_install_dir="${TTNN_INSTALL_DIR:-$tt_metal_root/build_Release}"
+export CMAKE_PREFIX_PATH="$ttnn_install_dir/lib/cmake/tt-nn:$ttnn_install_dir/lib/cmake/tt-metalium:$ttnn_install_dir${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+
+batch16_graph_dir="${BATCH16_GRAPH_DIR:-$script_dir/../graph_b16}"
+batch32_graph_dir="${BATCH32_GRAPH_DIR:-$script_dir/../graph_b32}"
+
+check_graph_dir() {
+    graph_dir="$1"
+    batch_size="$2"
+
+    if [ ! -f "$graph_dir/ttnn-standalone.cpp" ]; then
+        echo "Missing batch ${batch_size} generated file: $graph_dir/ttnn-standalone.cpp" >&2
+        echo "Set BATCH${batch_size}_GRAPH_DIR to the generated graph directory for batch ${batch_size}." >&2
+        exit 1
+    fi
+
+    if [ ! -f "$graph_dir/ttnn-precompiled.hpp" ]; then
+        echo "Missing batch ${batch_size} generated file: $graph_dir/ttnn-precompiled.hpp" >&2
+        exit 1
+    fi
+
+    if [ ! -d "$graph_dir/tensors" ]; then
+        echo "Missing batch ${batch_size} tensors directory: $graph_dir/tensors" >&2
+        exit 1
+    fi
+}
+
+run_batch() {
+    batch_size="$1"
+    graph_dir="$2"
+    shift 2
+    build_dir="$script_dir/build_b${batch_size}"
+
+    check_graph_dir "$graph_dir" "$batch_size"
+
+    echo "================ BUILDING BATCH ${batch_size} BENCHMARK ================"
+    cmake -G Ninja -B "$build_dir" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_COMPILER="${CXX:-clang++-20}" \
+        -DTTNN_CODEGEN_BATCH_SIZE="$batch_size" \
+        -DTTNN_CODEGEN_STANDALONE_CPP="$graph_dir/ttnn-standalone.cpp" \
+        "$script_dir"
+    cmake --build "$build_dir" -- ttnn-codegen-benchmark
+    echo "============ FINISH BUILDING BATCH ${batch_size} BENCHMARK ============"
+
+    echo "================ RUNNING BATCH ${batch_size} BENCHMARK ================"
+    "$build_dir/ttnn-codegen-benchmark" "$@"
+    echo "============= FINISH RUNNING BATCH ${batch_size} BENCHMARK ============"
+}
+
+run_batch 16 "$batch16_graph_dir" "$@"
+run_batch 32 "$batch32_graph_dir" "$@"

@@ -13,12 +13,14 @@ cd "$script_dir"
 # Set TT_METAL_RUNTIME_ROOT to this tt-metal checkout.
 export TT_METAL_RUNTIME_ROOT="$tt_metal_root"
 
-# Help CMake find TT-NNConfig/tt-nn-config from the tt-metal install prefix.
-export CMAKE_PREFIX_PATH="${TTNN_INSTALL_DIR:-$tt_metal_root/build_Release}${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+# Help CMake find the installed TT-NN/Metalium package exports before the
+# generated build-tree configs in the build root.
+ttnn_install_dir="${TTNN_INSTALL_DIR:-$tt_metal_root/build_Release}"
+export CMAKE_PREFIX_PATH="$ttnn_install_dir/lib/cmake/tt-nn:$ttnn_install_dir/lib/cmake/tt-metalium:$ttnn_install_dir${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 
 # Build
 echo "==================== BUILDING TTNN STANDALONE ==================="
-cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
+cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="${CXX:-clang++-20}"
 cmake --build build -- ttnn-standalone
 echo "================ FINISH BUILDING TTNN STANDALONE ================"
 
