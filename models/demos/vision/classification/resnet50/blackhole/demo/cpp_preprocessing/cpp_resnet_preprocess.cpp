@@ -298,13 +298,20 @@ py::tuple measure_preprocessing(
     int64_t warmup_iterations,
     int64_t measurement_iterations,
     int64_t workers) {
+    const auto extension_start = std::chrono::steady_clock::now();
     std::vector<std::string> image_bytes_list = py_bytes_list_to_vector(py_image_bytes_list);
     std::pair<double, torch::Tensor> result;
     {
         py::gil_scoped_release release;
         result = measure_preprocessing_cpp(image_bytes_list, batch_size, warmup_iterations, measurement_iterations, workers);
     }
-    return py::make_tuple(result.first, result.second);
+
+    py::tuple output(3);
+    output[0] = py::float_(result.first);
+    output[1] = py::cast(result.second);
+    const auto extension_end = std::chrono::steady_clock::now();
+    output[2] = py::float_(std::chrono::duration<double>(extension_end - extension_start).count());
+    return output;
 }
 
 }  // namespace
@@ -319,5 +326,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
         py::arg("warmup_iterations"),
         py::arg("measurement_iterations"),
         py::arg("workers"),
-        "Run warmup and measured preprocessing iterations in C++ and return (mean_seconds, last_inputs).");
+        "Run warmup and measured preprocessing iterations in C++ and return "
+        "(mean_seconds, last_inputs, extension_wall_seconds).");
 }

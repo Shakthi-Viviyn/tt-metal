@@ -40,6 +40,9 @@ CSV_COLUMNS = [
     "Workers",
     "Total Run Time (sec)",
     "Pre-processing Time (sec)",
+    "Python Extension Call Time (sec)",
+    "C++ Extension Wall Time (sec)",
+    "Python Switch Overhead Estimate (sec)",
     "Inference Time (sec)",
     "CPU Inference Time (sec)",
     "TT Inference Throughput (images/sec)",
@@ -220,12 +223,21 @@ def benchmark_batch(
     worker_count,
     args,
 ):
-    preprocessing_time, inputs = cpp_resnet_preprocess.measure_preprocessing(
+    python_extension_start = time.perf_counter()
+    preprocessing_time, inputs, cpp_extension_wall_time = cpp_resnet_preprocess.measure_preprocessing(
         image_bytes_list,
         batch_size,
         args.preprocess_warmup_iterations,
         args.measurement_iterations,
         worker_count,
+    )
+    python_extension_call_time = time.perf_counter() - python_extension_start
+    python_switch_overhead_estimate = (python_extension_call_time - cpp_extension_wall_time) / 2.0
+    logger.info(
+        "Preprocessing extension timing: "
+        f"python_call={python_extension_call_time:.9f}s, "
+        f"cpp_extension={cpp_extension_wall_time:.9f}s, "
+        f"python_switch_overhead_estimate={python_switch_overhead_estimate:.9f}s"
     )
 
     row = {
@@ -233,6 +245,9 @@ def benchmark_batch(
         "Workers": str(worker_count),
         "Total Run Time (sec)": "",
         "Pre-processing Time (sec)": format_seconds(preprocessing_time),
+        "Python Extension Call Time (sec)": format_seconds(python_extension_call_time, digits=9),
+        "C++ Extension Wall Time (sec)": format_seconds(cpp_extension_wall_time, digits=9),
+        "Python Switch Overhead Estimate (sec)": format_seconds(python_switch_overhead_estimate, digits=9),
         "Inference Time (sec)": "",
         "CPU Inference Time (sec)": "",
         "TT Inference Throughput (images/sec)": "",
@@ -294,6 +309,9 @@ def make_error_row(batch_size, error, worker_count=""):
         "Workers": str(worker_count),
         "Total Run Time (sec)": "",
         "Pre-processing Time (sec)": "",
+        "Python Extension Call Time (sec)": "",
+        "C++ Extension Wall Time (sec)": "",
+        "Python Switch Overhead Estimate (sec)": "",
         "Inference Time (sec)": "",
         "CPU Inference Time (sec)": "",
         "TT Inference Throughput (images/sec)": "",
