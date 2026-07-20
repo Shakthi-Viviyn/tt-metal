@@ -10,8 +10,13 @@ from loguru import logger
 from transformers import AutoImageProcessor
 
 import ttnn
+from models.common.utility_functions import run_for_blackhole
 from models.demos.utils.common_demo_utils import get_data_loader, load_imagenet_dataset
-from models.demos.vision.classification.mobilenetv2.common import MOBILENETV2_BATCH_SIZE, MOBILENETV2_L1_SMALL_SIZE
+from models.demos.vision.classification.mobilenetv2.common import (
+    MOBILENETV2_BATCH_SIZE,
+    MOBILENETV2_L1_SMALL_SIZE,
+    MOBILENETV2_TRACE_REGION_SIZE,
+)
 from models.experimental.efficientnetb0.common import EFFICIENTNETB0_L1_SMALL_SIZE
 from models.experimental.swin_s.common import SWIN_S_L1_SMALL_SIZE
 from models.experimental.swin_v2.common import SWIN_V2_L1_SMALL_SIZE
@@ -55,8 +60,17 @@ def evaluation(
             torch_input_tensor = inputs
             if model_type == "tt_model":
                 if model_name == "mobilenetv2":
+                    from models.demos.vision.classification.mobilenetv2.common import MOBILENETV2_INPUT_CHANNELS
+                    from models.demos.vision.classification.mobilenetv2.tt.model_preprocessing import (
+                        pack_mobilenetv2_pipeline_input,
+                    )
+
                     ttnn_input = torch.permute(inputs, (0, 2, 3, 1))
-                    ttnn_input = torch.nn.functional.pad(ttnn_input, (0, 16 - ttnn_input.shape[-1]), value=0)
+                    ttnn_input = torch.nn.functional.pad(
+                        ttnn_input,
+                        (0, MOBILENETV2_INPUT_CHANNELS - ttnn_input.shape[-1]),
+                        value=0,
+                    )
                     ttnn_input = ttnn.from_torch(
                         ttnn_input, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=inputs_mesh_mapper
                     )
@@ -64,6 +78,7 @@ def evaluation(
                         ttnn_input,
                         (1, 1, ttnn_input.shape[0] * ttnn_input.shape[1] * ttnn_input.shape[2], ttnn_input.shape[3]),
                     )
+                    ttnn_input = pack_mobilenetv2_pipeline_input(ttnn_input)
                     input_tensors_all.append(ttnn_input)
                 if model_name == "resnet50":
                     input_tensors_all.append(inputs)
@@ -350,18 +365,17 @@ def run_mobilenetv2_image_classification_eval(
     device, model_type, batch_size_per_device, res, model_location_generator, reset_seeds
 ):
     from models.demos.utils.common_demo_utils import get_batch, get_mesh_mappers
-    from models.demos.vision.classification.mobilenetv2.common import load_torch_model
+    from models.demos.vision.classification.mobilenetv2.common import MOBILENETV2_INPUT_CHANNELS, load_torch_model
     from models.demos.vision.classification.mobilenetv2.reference.mobilenetv2 import Mobilenetv2
     from models.demos.vision.classification.mobilenetv2.tt import ttnn_mobilenetv2
     from models.demos.vision.classification.mobilenetv2.tt.model_preprocessing import (
+        create_mobilenetv2_input_memory_configs,
         create_mobilenetv2_input_tensors,
         create_mobilenetv2_model_parameters,
+        pack_mobilenetv2_pipeline_input,
+        unpack_mobilenetv2_pipeline_input,
     )
-    from models.tt_cnn.tt.pipeline import (
-        PipelineConfig,
-        create_pipeline_from_config,
-        get_memory_config_for_persistent_dram_tensor,
-    )
+    from models.tt_cnn.tt.pipeline import PipelineConfig, create_pipeline_from_config
 
     batch_size = batch_size_per_device * device.get_num_devices()
     with torch.no_grad():
@@ -372,31 +386,26 @@ def run_mobilenetv2_image_classification_eval(
         ttnn_model = ttnn_mobilenetv2.TtMobileNetV2(model_parameters, device, batchsize=batch_size_per_device)
 
         _, host_input_tensor = create_mobilenetv2_input_tensors(
-            batch=batch_size, input_height=res, input_width=res, pad_channels=16, mesh_mapper=inputs_mesh_mapper
+            batch=batch_size,
+            input_height=res,
+            input_width=res,
+            pad_channels=MOBILENETV2_INPUT_CHANNELS,
+            mesh_mapper=inputs_mesh_mapper,
         )
-        input_dram_mem_config = get_memory_config_for_persistent_dram_tensor(
-            host_input_tensor.shape, ttnn.TensorMemoryLayout.HEIGHT_SHARDED, device.dram_grid_size()
-        )
+        host_input_tensor = pack_mobilenetv2_pipeline_input(host_input_tensor)
+        input_dram_mem_config, input_l1_mem_config = create_mobilenetv2_input_memory_configs(host_input_tensor, device)
         logger.info(
             f"Auto-selected persistent DRAM tensor memory config: shape={host_input_tensor.shape}, shard_shape={input_dram_mem_config.shard_spec.shape}, grid={input_dram_mem_config.shard_spec.grid}"
         )
 
-        input_l1_core_grid = ttnn.CoreGrid(x=8, y=8)
-        assert (
-            host_input_tensor.shape[-2] % input_l1_core_grid.num_cores == 0
-        ), "Expecting even sharding on L1 input tensor"
-        input_l1_mem_config = ttnn.create_sharded_memory_config(
-            shape=(host_input_tensor.shape[2] // input_l1_core_grid.num_cores, host_input_tensor.shape[-1]),
-            core_grid=input_l1_core_grid,
-            strategy=ttnn.ShardStrategy.HEIGHT,
-            orientation=ttnn.ShardOrientation.ROW_MAJOR,
-            use_height_and_width_as_shard_shape=True,
-        )
-
         config = PipelineConfig(use_trace=True, num_command_queues=2, all_transfers_on_separate_command_queue=False)
+
+        def model_wrapper(packed_input_tensor):
+            return ttnn_model(unpack_mobilenetv2_pipeline_input(packed_input_tensor))
+
         pipe = create_pipeline_from_config(
             config,
-            ttnn_model,
+            model_wrapper,
             device,
             dram_input_memory_config=input_dram_mem_config,
             l1_input_memory_config=input_l1_mem_config,
@@ -419,9 +428,16 @@ def run_mobilenetv2_image_classification_eval(
     )
 
 
+@run_for_blackhole()
 @pytest.mark.parametrize(
     "device_params",
-    [{"l1_small_size": MOBILENETV2_L1_SMALL_SIZE, "trace_region_size": 6434816, "num_command_queues": 2}],
+    [
+        {
+            "l1_small_size": MOBILENETV2_L1_SMALL_SIZE,
+            "trace_region_size": MOBILENETV2_TRACE_REGION_SIZE,
+            "num_command_queues": 2,
+        }
+    ],
     indirect=True,
 )
 @pytest.mark.parametrize(
@@ -443,9 +459,16 @@ def test_mobilenetv2_image_classification_eval(
     )
 
 
+@run_for_blackhole()
 @pytest.mark.parametrize(
     "device_params",
-    [{"l1_small_size": MOBILENETV2_L1_SMALL_SIZE, "trace_region_size": 6434816, "num_command_queues": 2}],
+    [
+        {
+            "l1_small_size": MOBILENETV2_L1_SMALL_SIZE,
+            "trace_region_size": MOBILENETV2_TRACE_REGION_SIZE,
+            "num_command_queues": 2,
+        }
+    ],
     indirect=True,
 )
 @pytest.mark.parametrize(

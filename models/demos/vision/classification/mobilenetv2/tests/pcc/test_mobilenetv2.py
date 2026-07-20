@@ -6,6 +6,7 @@
 import pytest
 
 import ttnn
+from models.common.utility_functions import run_for_blackhole
 from models.demos.vision.classification.mobilenetv2.common import (
     MOBILENETV2_BATCH_SIZE,
     MOBILENETV2_L1_SMALL_SIZE,
@@ -20,6 +21,7 @@ from models.demos.vision.classification.mobilenetv2.tt.model_preprocessing impor
 from tests.ttnn.utils_for_testing import assert_with_pcc
 
 
+@run_for_blackhole()
 @pytest.mark.parametrize("device_params", [{"l1_small_size": MOBILENETV2_L1_SMALL_SIZE}], indirect=True)
 @pytest.mark.parametrize(
     "use_pretrained_weight",
@@ -47,7 +49,7 @@ def test_mobilenetv2(device, use_pretrained_weight, batch_size, reset_seeds, mod
     torch_model.eval()
 
     torch_input_tensor, ttnn_input_tensor = create_mobilenetv2_input_tensors(
-        batch=batch_size, input_height=224, input_width=224
+        batch=batch_size, input_height=224, input_width=224, pad_channels=16
     )
     torch_output_tensor = torch_model(torch_input_tensor)
 

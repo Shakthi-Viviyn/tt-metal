@@ -1,7 +1,7 @@
 # Mobilenetv2
 
 ## Platforms:
-    Wormhole (n150, n300)
+    Blackhole
 
 ### Introduction
 The MobileNetV2 model is a convolutional neural network (CNN) architecture designed for efficient mobile and embedded vision applications. It was introduced in the paper ["MobileNetV2: Inverted Residuals and Linear Bottlenecks"](https://arxiv.org/abs/1801.04381). </br>
@@ -21,14 +21,14 @@ pytest models/demos/vision/classification/mobilenetv2/tests/pcc/test_mobilenetv2
 
 ### Performant Model with Trace+2CQ
 #### Single Device (BS=10):
-- End-2-end perf is 3030 FPS (**On N150**), _On N300 single device, the FPS will be low as it uses ethernet dispatch_
+- Validated on Blackhole at batch size 10. A local 32-iteration run measured 2.73 ms per batch (3664.71 FPS); results vary by system and build.
 
 ```
-pytest models/demos/vision/classification/mobilenetv2/tests/perf/test_perf_e2e_mobilenetv2.py:test_mobilenetv2_e2e
+pytest models/demos/vision/classification/mobilenetv2/tests/perf/test_perf_e2e_mobilenetv2.py::test_mobilenetv2_e2e
 ```
 
-#### Multi Device (DP=2, n300):
-- End-2-end perf is 5280 FPS
+#### Multi Device (DP=2):
+- Blackhole multi-device correctness and performance are not yet characterized.
 
 ```
 pytest models/demos/vision/classification/mobilenetv2/tests/perf/test_perf_e2e_mobilenetv2.py::test_mobilenetv2_e2e_dp
@@ -41,10 +41,14 @@ pytest models/demos/vision/classification/mobilenetv2/tests/perf/test_perf_e2e_m
 pytest models/demos/vision/classification/mobilenetv2/demo/demo.py::test_mobilenetv2_imagenet_demo
 ```
 
-#### Multi Device (DP=2, n300):
+#### Multi Device (DP=2):
 ```
 pytest models/demos/vision/classification/mobilenetv2/demo/demo.py::test_mobilenetv2_imagenet_demo_dp
 ```
+
+### End-to-end C++ preprocessing benchmark
+
+The Blackhole benchmark measures TurboJPEG decode, resize, crop, normalization, TT input packing, and trace+1CQ inference at the supported batch size of 10. See the [C++ preprocessing benchmark README](blackhole/demo/cpp_preprocessing/README.md) for build and run instructions.
 
 ## Testing
 
@@ -54,7 +58,7 @@ pytest models/demos/vision/classification/mobilenetv2/demo/demo.py::test_mobilen
 pytest models/demos/vision/classification/classification_eval/classification_eval.py::test_mobilenetv2_image_classification_eval
 ```
 
-#### Multi Device (DP=2, n300):
+#### Multi Device (DP=2):
 ```
 pytest models/demos/vision/classification/classification_eval/classification_eval.py::test_mobilenetv2_image_classification_eval_dp
 ```
@@ -66,3 +70,4 @@ Note: The model is evaluated with 512 samples.
 - Supported Input Resolution - (224,224) (Height,Width)
 - Batch Size :10
 - Dataset used for evaluation - **imagenet-1k**
+- The current implementation is Blackhole-only. Run the PCC test before the traced performance or demo paths when bringing it up on a new Blackhole SKU.

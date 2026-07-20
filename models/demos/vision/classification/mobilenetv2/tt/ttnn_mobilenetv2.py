@@ -9,6 +9,10 @@ from models.demos.vision.classification.mobilenetv2.tt.common import TtInvertedR
 
 class TtMobileNetV2:
     def __init__(self, model_params, device, batchsize) -> None:
+        if device.arch() != ttnn.device.Arch.BLACKHOLE:
+            raise RuntimeError(
+                f"MobileNetV2 is configured for Blackhole, but the selected device architecture is {device.arch()}"
+            )
         self.device = device
         self.model_parameters = model_params
         self.batchsize = batchsize
@@ -257,6 +261,13 @@ class TtMobileNetV2:
         output_tensor, h, w = self.conv4(output_tensor)
 
         num_cores = output_tensor.shape[3] // 32
+        device_grid = self.device.compute_with_storage_grid_size()
+        available_cores = device_grid.x * device_grid.y
+        if num_cores > available_cores:
+            raise RuntimeError(
+                "MobileNetV2 classifier requires more worker cores than are available: "
+                f"required={num_cores}, available={available_cores}"
+            )
         grid = ttnn.num_cores_to_corerangeset(num_cores, self.device.compute_with_storage_grid_size())
         width_mem_config = ttnn.create_sharded_memory_config_(
             [nearest_32(output_tensor.shape[2]), output_tensor.shape[3] // num_cores],

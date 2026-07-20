@@ -6,10 +6,13 @@
 import pytest
 from loguru import logger
 
+from models.common.utility_functions import run_for_blackhole
 from models.demos.vision.classification.mobilenetv2.common import MOBILENETV2_BATCH_SIZE
 from models.perf.device_perf_utils import check_device_perf, prep_device_perf_report, run_device_perf
 
 
+@run_for_blackhole()
+@pytest.mark.skip(reason="Blackhole device-performance target must be set after hardware characterization")
 @pytest.mark.models_device_performance_bare_metal
 @pytest.mark.parametrize(
     "batch_size, expected_perf",

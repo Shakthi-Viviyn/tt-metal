@@ -6,8 +6,14 @@ import os
 
 import torch
 
-MOBILENETV2_L1_SMALL_SIZE = 8 * 1024  # 8 KiB
+# Blackhole-first configuration. Keep the batch size at the value for which the
+# convolution sharding strategy was originally tuned until additional batch
+# sizes have been validated on hardware.
+MOBILENETV2_L1_SMALL_SIZE = 32 * 1024
+MOBILENETV2_TRACE_REGION_SIZE = 6434816
 MOBILENETV2_BATCH_SIZE = 10
+MOBILENETV2_INPUT_CHANNELS = 16
+MOBILENETV2_PIPELINE_INPUT_CHANNELS = 32
 
 
 def load_torch_model(torch_model, model_location_generator=None):

@@ -7,11 +7,16 @@ import torch.nn as nn
 
 import ttnn
 from models.demos.utils.common_demo_utils import get_mesh_mappers
+from models.demos.vision.classification.mobilenetv2.common import (
+    MOBILENETV2_INPUT_CHANNELS,
+    MOBILENETV2_PIPELINE_INPUT_CHANNELS,
+)
 from models.demos.vision.classification.mobilenetv2.reference.mobilenetv2 import (  # Import Conv2dNormActivation
     Conv2dNormActivation,
     InvertedResidual,
     Mobilenetv2,
 )
+from models.tt_cnn.tt.pipeline import get_memory_config_for_persistent_dram_tensor
 
 
 def preprocess_linear_weight(weight, *, dtype, layout=ttnn.TILE_LAYOUT, mesh_mapper=None):
@@ -48,6 +53,99 @@ def create_mobilenetv2_input_tensors(
         ),
     )
     return torch_input_tensor, ttnn_input_tensor
+
+
+def pack_mobilenetv2_pipeline_input(input_tensor):
+    """Pack pairs of 16-channel rows into DRAM-aligned 32-channel rows."""
+
+    if len(input_tensor.shape) != 4:
+        raise ValueError(f"MobileNetV2 pipeline packing expects a 4D tensor (was {input_tensor.shape})")
+    if input_tensor.shape[-1] != MOBILENETV2_INPUT_CHANNELS:
+        raise ValueError(
+            f"MobileNetV2 pipeline packing expects {MOBILENETV2_INPUT_CHANNELS} channels "
+            f"(was {input_tensor.shape[-1]})"
+        )
+    if input_tensor.shape[-2] % 2 != 0:
+        raise ValueError(
+            f"MobileNetV2 pipeline packing expects an even flattened height (was {input_tensor.shape[-2]})"
+        )
+
+    return ttnn.reshape(
+        input_tensor,
+        (
+            input_tensor.shape[0],
+            input_tensor.shape[1],
+            input_tensor.shape[2] // 2,
+            MOBILENETV2_PIPELINE_INPUT_CHANNELS,
+        ),
+    )
+
+
+def unpack_mobilenetv2_pipeline_input(input_tensor):
+    """Restore a packed persistent-pipeline input before the first convolution."""
+
+    if len(input_tensor.shape) != 4:
+        raise ValueError(f"MobileNetV2 pipeline unpacking expects a 4D tensor (was {input_tensor.shape})")
+    if input_tensor.shape[-1] != MOBILENETV2_PIPELINE_INPUT_CHANNELS:
+        raise ValueError(
+            f"MobileNetV2 pipeline unpacking expects {MOBILENETV2_PIPELINE_INPUT_CHANNELS} channels "
+            f"(was {input_tensor.shape[-1]})"
+        )
+
+    return ttnn.reshape(
+        input_tensor,
+        (
+            input_tensor.shape[0],
+            input_tensor.shape[1],
+            input_tensor.shape[2] * 2,
+            MOBILENETV2_INPUT_CHANNELS,
+        ),
+    )
+
+
+def create_mobilenetv2_input_memory_configs(host_input_tensor, device):
+    """Create Blackhole-safe persistent DRAM and L1 input configurations.
+
+    The persistent pipeline packs pairs of 16-channel rows into 32-channel rows
+    so each stick is naturally aligned to Blackhole's 64-byte DRAM alignment
+    without increasing the tensor volume. A 16-channel DRAM stick requires a
+    reshard scratch circular buffer that exceeds the hardware page-count limit
+    at batch 10. Spread the L1 tensor across the largest rectangular,
+    evenly-dividing worker grid so the live input shards do not overlap the
+    first convolution's static circular buffers and reshape remains a metadata
+    operation.
+    """
+
+    if host_input_tensor.shape[-1] != MOBILENETV2_PIPELINE_INPUT_CHANNELS:
+        raise ValueError(
+            f"The Blackhole MobileNetV2 persistent pipeline requires "
+            f"{MOBILENETV2_PIPELINE_INPUT_CHANNELS}-channel input staging "
+            f"(was {host_input_tensor.shape[-1]})"
+        )
+
+    input_dram_mem_config = get_memory_config_for_persistent_dram_tensor(
+        host_input_tensor.shape, ttnn.TensorMemoryLayout.HEIGHT_SHARDED, device.dram_grid_size()
+    )
+
+    device_grid = device.compute_with_storage_grid_size()
+    flattened_height = host_input_tensor.shape[-2]
+    grid_candidates = [
+        (grid_x * grid_y, grid_x, grid_y)
+        for grid_x in range(1, device_grid.x + 1)
+        for grid_y in range(1, device_grid.y + 1)
+        if flattened_height % (grid_x * grid_y) == 0
+    ]
+    num_input_cores, input_grid_x, input_grid_y = max(grid_candidates)
+    input_l1_core_grid = ttnn.CoreGrid(x=input_grid_x, y=input_grid_y)
+
+    input_l1_mem_config = ttnn.create_sharded_memory_config(
+        shape=(flattened_height // num_input_cores, host_input_tensor.shape[-1]),
+        core_grid=input_l1_core_grid,
+        strategy=ttnn.ShardStrategy.HEIGHT,
+        orientation=ttnn.ShardOrientation.ROW_MAJOR,
+        use_height_and_width_as_shard_shape=True,
+    )
+    return input_dram_mem_config, input_l1_mem_config
 
 
 def fold_batch_norm2d_into_conv2d(conv, bn, mesh_mapper=None):
