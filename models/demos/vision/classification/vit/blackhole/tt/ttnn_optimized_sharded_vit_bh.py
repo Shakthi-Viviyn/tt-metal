@@ -161,7 +161,12 @@ def update_model_config(config, batch_size):
     # properties are not in the output of config.to_dict() but can be used later in the model
     # e.g. https://github.com/huggingface/transformers/blob/v4.53.0/src/transformers/configuration_utils.py#L368-L378
     property_names = [name for name, value in inspect.getmembers(config.__class__) if isinstance(value, property)]
-    properties = {name: getattr(config, name) for name in property_names}
+    properties = {}
+    for name in property_names:
+        try:
+            properties[name] = getattr(config, name)
+        except AttributeError:
+            continue
 
     return DotAccessDict(
         dict(
